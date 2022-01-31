@@ -1,8 +1,8 @@
 /**
    Use the latest sensor readings to calculate the Air Quality
-   Index value using the UK reporting method.
+   Index value using the EPA AQI reporting method.
 */
-void calculateUkAqi()
+void calculateEpaAqi()
 {
   uint8_t pm2p5_aqi = 0;
   if (g_pm2p5_ppd_value <= 11) {
@@ -52,8 +52,8 @@ void calculateUkAqi()
 
   if (pm10p0_aqi > pm2p5_aqi)
   {
-    g_uk_aqi_value = pm10p0_aqi;
+    g_epa_aqi_value = pm10p0_aqi;
   } else {
-    g_uk_aqi_value = pm2p5_aqi;
+    g_epa_aqi_value = pm2p5_aqi;
   }
 }

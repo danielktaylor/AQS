@@ -3,12 +3,9 @@
 
   Read from a Plantower PMS5003 particulate matter sensor using a Wemos D1
   Mini (or other ESP8266-based board) and report the values to an MQTT
-  broker and to the serial console. Also optionally show them on a 128x32
-  I2C OLED display, with a mode button to change between display modes.
+  broker and to the serial console.
 
   External dependencies. Install using the Arduino library manager:
-     "Adafruit GFX Library" by Adafruit
-     "Adafruit SSD1306" by Adafruit
      "PubSubClient" by Nick O'Leary
 
   Bundled dependencies. No need to install separately:
@@ -29,8 +26,6 @@
 /*--------------------------- Libraries ----------------------------------*/
 #include <Wire.h>                     // For I2C
 #include <SoftwareSerial.h>           // Allows PMS to avoid the USB serial port
-#include <Adafruit_GFX.h>             // For OLED
-#include <Adafruit_SSD1306.h>         // For OLED
 #include <ESP8266WiFi.h>              // ESP8266 WiFi driver
 #include <PubSubClient.h>             // Required for MQTT
 #include "PMS.h"                      // Particulate Matter Sensor driver (embedded)
@@ -60,7 +55,7 @@ uint32_t  g_pm2p5_ppd_value     = 0;  // Particles Per Deciliter pm2.5 reading
 uint32_t  g_pm5p0_ppd_value     = 0;  // Particles Per Deciliter pm5.0 reading
 uint32_t  g_pm10p0_ppd_value    = 0;  // Particles Per Deciliter pm10.0 reading
 
-uint8_t   g_uk_aqi_value        = 0;  // Air Quality Index value using UK reporting system
+uint8_t   g_epa_aqi_value        = 0;  // Air Quality Index value using EPA reporting system
 uint16_t  g_us_aqi_value        = 0;  // Air Quality Index value using US reporting system
 
 // MQTT
@@ -77,25 +72,11 @@ char g_pm1p0_ppd_mqtt_topic[50];      // MQTT topic for reporting pm1.0 PPD valu
 char g_pm2p5_ppd_mqtt_topic[50];      // MQTT topic for reporting pm2.5 PPD value
 char g_pm5p0_ppd_mqtt_topic[50];      // MQTT topic for reporting pm5.0 PPD value
 char g_pm10p0_ppd_mqtt_topic[50];     // MQTT topic for reporting pm10.0 PPD value
-char g_uk_aqi_mqtt_topic[50];         // MQTT topic for UK-format AQI value
-char g_us_aqi_mqtt_topic[50];         // MQTT topic for US-format AQI value
+char g_epa_aqi_mqtt_topic[50];         // MQTT topic for EPA-format AQI value
 #endif
 #if REPORT_MQTT_JSON
 char g_mqtt_json_topic[50];           // MQTT topic for reporting all values using JSON
 #endif
-
-// OLED Display
-#define DISPLAY_STATE_GRAMS   1       // Display values in micrograms/m^3 on screen
-#define DISPLAY_STATE_PPD     2       // Display values in parts per deciliter on screen
-#define DISPLAY_STATE_INFO    3       // Display network status on screen
-#define NUM_OF_STATES 3               // Number of possible states
-uint8_t g_display_state = DISPLAY_STATE_GRAMS;  // Display values in micrograms/m^3 by default
-
-// Mode Button
-uint8_t  g_current_mode_button_state  =  1;  // Pin is pulled high by default
-uint8_t  g_previous_mode_button_state =  1;
-uint32_t g_last_debounce_time         =  0;
-uint32_t g_debounce_delay             = 100;
 
 // Wifi
 #define WIFI_CONNECT_INTERVAL           500  // Wait 500ms intervals for wifi connection
@@ -107,12 +88,10 @@ uint32_t g_device_id2;                    // Unique ID from ESP chip ID
 
 /*--------------------------- Function Signatures ------------------------*/
 void mqttCallback(char* topic, byte* payload, uint8_t length);
-void checkModeButton();
 bool initWifi();
 void reconnectMqtt();
 void updatePmsReadings();
 void reportToMqtt();
-void renderScreen();
 
 /* -------------------------- Resources ----------------------------------*/
 #include "aqi.h"                         // Air Quality Index calculations
@@ -124,9 +103,6 @@ SoftwareSerial pmsSerial(PMS_RX_PIN, PMS_TX_PIN); // Rx pin = GPIO2 (D4 on Wemos
 // Particulate matter sensor
 PMS pms(pmsSerial);                      // Use the software serial port for the PMS
 PMS::DATA g_data;
-
-// OLED
-Adafruit_SSD1306 OLED(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // MQTT
 WiFiClient esp_client;
@@ -154,20 +130,6 @@ void setup()
   Serial.print("Device ID: ");
   Serial.println(g_device_id, HEX);
 
-  // Set up display
-  OLED.begin();
-  OLED.clearDisplay();
-  OLED.setTextWrap(false);
-  OLED.setTextSize(1);
-  OLED.setTextColor(WHITE);
-  OLED.setCursor(0, 0);
-  OLED.println("www.superhouse.tv/aqs");
-  OLED.println(" Particulate Matter");
-  OLED.print(" Sensor v"); OLED.println(VERSION);
-  OLED.print  (" Device id: ");
-  OLED.println(g_device_id, HEX);
-  OLED.display();
-
   // Set up the topics for publishing sensor readings. By inserting the unique ID,
   // the result is of the form: "tele/d9616f/AE1P0" etc
   sprintf(g_command_topic,         "cmnd/%x/COMMAND",   ESP.getChipId());  // For receiving commands
@@ -181,8 +143,7 @@ void setup()
   sprintf(g_pm2p5_ppd_mqtt_topic,  "tele/%x/PPD2P5",    ESP.getChipId());  // Data from PMS
   sprintf(g_pm5p0_ppd_mqtt_topic,  "tele/%x/PPD5P0",    ESP.getChipId());  // Data from PMS
   sprintf(g_pm10p0_ppd_mqtt_topic, "tele/%x/PPD10P0",   ESP.getChipId());  // Data from PMS
-  sprintf(g_uk_aqi_mqtt_topic,     "tele/%x/AQIUK",     ESP.getChipId());  // Calculated value
-  sprintf(g_us_aqi_mqtt_topic,     "tele/%x/AQIUS",     ESP.getChipId());  // Calculated value
+  sprintf(g_epa_aqi_mqtt_topic,    "tele/%x/AQI",       ESP.getChipId());  // Calculated value
 #endif
 #if REPORT_MQTT_JSON
   sprintf(g_mqtt_json_topic,       "tele/%x/SENSOR",    ESP.getChipId());  // Data from PMS
@@ -201,8 +162,7 @@ void setup()
   Serial.println(g_pm2p5_ppd_mqtt_topic);   // From PMS
   Serial.println(g_pm5p0_ppd_mqtt_topic);   // From PMS
   Serial.println(g_pm10p0_ppd_mqtt_topic);  // From PMS
-  Serial.println(g_uk_aqi_mqtt_topic);      // Calculated value
-  Serial.println(g_us_aqi_mqtt_topic);      // Calculated value
+  Serial.println(g_epa_aqi_mqtt_topic);      // Calculated value
 #endif
 #if REPORT_MQTT_JSON
   Serial.println(g_mqtt_json_topic);        // From PMS
@@ -212,16 +172,11 @@ void setup()
   Serial.println("Connecting to WiFi");
   if (initWifi())
   {
-    OLED.println("WiFi [CONNECTED]");
     Serial.println("WiFi connected");
   } else {
-    OLED.println("WiFi [FAILED]");
     Serial.println("WiFi FAILED");
   }
-  OLED.display();
   delay(100);
-
-  pinMode(MODE_BUTTON_PIN, INPUT_PULLUP); // Pin for screen mode button
 
   /* Set up the MQTT client */
   client.setServer(mqtt_broker, 1883);
@@ -243,39 +198,7 @@ void loop()
   }
   client.loop();  // Process any outstanding MQTT messages
 
-  checkModeButton();
   updatePmsReadings();
-  renderScreen();
-}
-
-/**
-  Read the display mode button and switch the display mode if necessary
-*/
-void checkModeButton()
-{
-  g_current_mode_button_state = digitalRead(MODE_BUTTON_PIN);
-
-  // Check if button is now pressed and it was previously unpressed
-  if (HIGH == g_previous_mode_button_state && LOW == g_current_mode_button_state)
-  {
-    // We haven't waited long enough so ignore this press
-    if (millis() - g_last_debounce_time <= g_debounce_delay)
-    {
-      return;
-    }
-    Serial.println("Button pressed");
-
-    // Increment display state
-    g_last_debounce_time = millis();
-    if (g_display_state >= NUM_OF_STATES)
-    {
-      g_display_state = 1;
-    } else {
-      g_display_state++;
-    }
-  }
-
-  g_previous_mode_button_state = g_current_mode_button_state;
 }
 
 /**
@@ -345,7 +268,7 @@ void updatePmsReadings()
       pms.sleep();
 
       // Calculate AQI values for the various reporting standards
-      calculateUkAqi();
+      calculateEpaAqi();
 
       // Report the new values
       reportToMqtt();
@@ -355,103 +278,6 @@ void updatePmsReadings()
       g_pms_state = PMS_STATE_ASLEEP;
     }
   }
-}
-
-/**
-  Render the correct screen based on the display mode
-*/
-void renderScreen()
-{
-  OLED.clearDisplay();
-  OLED.setCursor(0, 0);
-
-  // Render our displays
-  switch (g_display_state)
-  {
-    case DISPLAY_STATE_GRAMS:
-      OLED.setTextWrap(false);
-
-      if (true == g_pms_ae_readings_taken)
-      {
-        OLED.println("  Particles ug/m^3");
-
-        OLED.print("     PM  1.0: ");
-        OLED.println(g_pm1p0_ae_value);
-
-        OLED.print("     PM  2.5: ");
-        OLED.println(g_pm2p5_ae_value);
-
-        OLED.print("     PM 10.0: ");
-        OLED.println(g_pm10p0_ae_value);
-      } else {
-        OLED.println("  Particles ug/m^3");
-        OLED.println("  ----------------");
-        OLED.println(" Preparing sensor and");
-        OLED.println("   waiting for data");
-      }
-      break;
-
-    case DISPLAY_STATE_PPD:
-      OLED.setTextWrap(false);
-
-      if (true == g_pms_ppd_readings_taken)
-      {
-        OLED.println("Particles / Deciliter");
-
-        OLED.print(" 0.3: ");
-        OLED.print(g_pm0p3_ppd_value);
-        OLED.setCursor(64, 8);
-        OLED.print("0.5:  ");
-        OLED.println(g_pm0p5_ppd_value);
-
-        OLED.print(" 1.0: ");
-        OLED.print(g_pm1p0_ppd_value);
-        OLED.setCursor(64, 16);
-        OLED.print("2.5:  ");
-        OLED.println(g_pm2p5_ppd_value);
-
-        OLED.print(" 5.0: ");
-        OLED.print(g_pm5p0_ppd_value);
-        OLED.setCursor(64, 24);
-        OLED.print("10.0: ");
-        OLED.println(g_pm10p0_ppd_value);
-      } else {
-        OLED.println("Particles / Deciliter");
-        OLED.println("---------------------");
-        OLED.println(" Preparing sensor and");
-        OLED.println("   waiting for data");
-      }
-      break;
-
-    case DISPLAY_STATE_INFO:
-      OLED.print("IP:   ");
-      OLED.println(WiFi.localIP());
-      char mqtt_client_id[20];
-      sprintf(mqtt_client_id, "esp8266%x", g_device_id);
-      OLED.setTextWrap(false);
-      OLED.print("ID:   ");
-      OLED.println(mqtt_client_id);
-      OLED.print("SSID: ");
-      OLED.println(ssid);
-      OLED.print("WiFi: ");
-      if (WiFi.status() == WL_CONNECTED)
-      {
-        OLED.print("OK");
-      } else {
-        OLED.print("FAILED");
-      }
-      OLED.print("   Up:");
-      OLED.print((int)millis() / 1000);
-      break;
-
-    /* This fallback helps with debugging if you call a state that isn't defined */
-    default:
-      OLED.println("Unknown state:");
-      OLED.println(g_display_state);
-      break;
-  }
-
-  OLED.display();
 }
 
 /**
@@ -512,10 +338,10 @@ void reportToMqtt()
     message_string.toCharArray(g_mqtt_message_buffer, message_string.length() + 1);
     client.publish(g_pm10p0_ppd_mqtt_topic, g_mqtt_message_buffer);
 
-    /* Report UK AQI value */
-    message_string = String(g_uk_aqi_value);
+    /* Report EPA AQI value */
+    message_string = String(g_epa_aqi_value);
     message_string.toCharArray(g_mqtt_message_buffer, message_string.length() + 1);
-    client.publish(g_uk_aqi_mqtt_topic, g_mqtt_message_buffer);
+    client.publish(g_epa_aqi_mqtt_topic, g_mqtt_message_buffer);
   }
 #endif
 
@@ -536,12 +362,12 @@ void reportToMqtt()
   // Format the message as JSON in the outgoing message buffer:
   if (true == g_pms_ppd_readings_taken)
   {
-    sprintf(g_mqtt_message_buffer,  "{\"PMS5003\":{\"CF1\":%i,\"CF2.5\":%i,\"CF10\":%i,\"PM1\":%i,\"PM2.5\":%i,\"PM10\":%i,\"PB0.3\":%i,\"PB0.5\":%i,\"PB1\":%i,\"PB2.5\":%i,\"PB5\":%i,\"PB10\":%i,\"UKAQI\":%i}}",
+    sprintf(g_mqtt_message_buffer,  "{\"PMS5003\":{\"CF1\":%i,\"CF2.5\":%i,\"CF10\":%i,\"PM1\":%i,\"PM2.5\":%i,\"PM10\":%i,\"PB0.3\":%i,\"PB0.5\":%i,\"PB1\":%i,\"PB2.5\":%i,\"PB5\":%i,\"PB10\":%i,\"AQI\":%i}}",
             g_pm1p0_sp_value, g_pm2p5_sp_value, g_pm10p0_sp_value,
             g_pm1p0_ae_value, g_pm2p5_ae_value, g_pm10p0_ae_value,
             g_pm0p3_ppd_value, g_pm0p5_ppd_value, g_pm1p0_ppd_value,
             g_pm2p5_ppd_value, g_pm5p0_ppd_value, g_pm10p0_ppd_value,
-            g_uk_aqi_value);
+            g_epa_aqi_value);
   } else {
     sprintf(g_mqtt_message_buffer,  "{\"PMS5003\":{\"CF1\":%i,\"CF2.5\":%i,\"CF10\":%i,\"PM1\":%i,\"PM2.5\":%i,\"PM10\":%i}}",
             g_pm1p0_sp_value, g_pm2p5_sp_value, g_pm10p0_sp_value,
@@ -598,9 +424,9 @@ void reportToSerial()
     Serial.print("PB10:");
     Serial.println(String(g_pm10p0_ppd_value));
 
-    /* Report UK AQI value */
-    Serial.print("UKAQI:");
-    Serial.println(String(g_uk_aqi_value));
+    /* Report EPA AQI value */
+    Serial.print("AQI:");
+    Serial.println(String(g_epa_aqi_value));
   }
 }
 
