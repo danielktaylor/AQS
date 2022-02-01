@@ -76,93 +76,59 @@ void PMS::loop()
   _status = STATUS_WAITING;
   if (_stream->available())
   {
-    uint8_t ch = _stream->read();
-
-    switch (_index)
-    {
-      case 0:
-        if (ch != 0x42)
-        {
-          return;
-        }
-        _calculatedChecksum = ch;
-        break;
-
-      case 1:
-        if (ch != 0x4D)
-        {
-          _index = 0;
-          return;
-        }
-        _calculatedChecksum += ch;
-        break;
-
-      case 2:
-        _calculatedChecksum += ch;
-        _frameLen = ch << 8;
-        break;
-
-      case 3:
-        _frameLen |= ch;
-        // Unsupported sensor, different frame length, transmission error e.t.c.
-        if (_frameLen != 2 * 9 + 2 && _frameLen != 2 * 13 + 2)
-        {
-          _index = 0;
-          return;
-        }
-        _calculatedChecksum += ch;
-        break;
-
-      default:
-        if (_index == _frameLen + 2)
-        {
-          _checksum = ch << 8;
-        }
-        else if (_index == _frameLen + 2 + 1)
-        {
-          _checksum |= ch;
-
-          if (_calculatedChecksum == _checksum)
-          {
-            _status = STATUS_OK;
-
-            // Standard Particles, CF=1.
-            _data->PM_SP_UG_1_0 = makeWord(_payload[0], _payload[1]);
-            _data->PM_SP_UG_2_5 = makeWord(_payload[2], _payload[3]);
-            _data->PM_SP_UG_10_0 = makeWord(_payload[4], _payload[5]);
-
-            // Atmospheric Environment.
-            _data->PM_AE_UG_1_0 = makeWord(_payload[6], _payload[7]);
-            _data->PM_AE_UG_2_5 = makeWord(_payload[8], _payload[9]);
-            _data->PM_AE_UG_10_0 = makeWord(_payload[10], _payload[11]);
-
-            // Total particles
-            _data->PM_TOTALPARTICLES_0_3 = makeWord(_payload[12], _payload[13]);
-            _data->PM_TOTALPARTICLES_0_5 = makeWord(_payload[14], _payload[15]);
-            _data->PM_TOTALPARTICLES_1_0 = makeWord(_payload[16], _payload[17]);
-            _data->PM_TOTALPARTICLES_2_5 = makeWord(_payload[18], _payload[19]);
-            _data->PM_TOTALPARTICLES_5_0 = makeWord(_payload[20], _payload[21]);
-            _data->PM_TOTALPARTICLES_10_0 = makeWord(_payload[22], _payload[23]);
-          }
-
-          _index = 0;
-          return;
-        }
-        else
-        {
-          _calculatedChecksum += ch;
-          uint8_t payloadIndex = _index - 4;
-
-          // Payload is common to all sensors (first 2x6 bytes).
-          if (payloadIndex < sizeof(_payload))
-          {
-            _payload[payloadIndex] = ch;
-          }
-        }
-
-        break;
+    // Read a byte at a time until we get to the special '0x42' start-byte
+    if (_stream->peek() != 0x42) {
+      _stream->read();
+      return;
     }
 
-    _index++;
+    // Now read all 32 bytes
+    if (_stream->available() < 32) {
+      return;
+    }
+
+    uint8_t buffer[32];
+    uint16_t sum = 0;
+    _stream->readBytes(buffer, 32);
+
+    // get checksum ready
+    for (uint8_t i=0; i<30; i++) {
+      sum += buffer[i];
+    }
+
+    // The data comes in endian'd, this solves it so it works on all platforms
+    uint16_t buffer_u16[15];
+    for (uint8_t i=0; i<15; i++) {
+      buffer_u16[i] = buffer[2 + i*2 + 1];
+      buffer_u16[i] += (buffer[2 + i*2] << 8);
+    }
+
+    // put it into a nice struct :)
+    struct pms5003data sdata;
+    memcpy((void *)&sdata, (void *)buffer_u16, 30);
+
+    if (sum != sdata.checksum) {
+      return;
+    }
+    // success!
+    _status = STATUS_OK;
+
+    // Standard Particles, CF=1.
+    _data->PM_SP_UG_1_0 = sdata.pm10_standard;
+    _data->PM_SP_UG_2_5 = sdata.pm25_standard;
+    _data->PM_SP_UG_10_0 = sdata.pm100_standard;
+
+    // Atmospheric Environment.
+    _data->PM_AE_UG_1_0 = sdata.pm10_env;
+    _data->PM_AE_UG_2_5 = sdata.pm25_env;
+    _data->PM_AE_UG_10_0 = sdata.pm100_env;
+
+    // Total particles
+    _data->PM_TOTALPARTICLES_0_3 = sdata.particles_03um;
+    _data->PM_TOTALPARTICLES_0_5 = sdata.particles_05um;
+    _data->PM_TOTALPARTICLES_1_0 = sdata.particles_10um;
+    _data->PM_TOTALPARTICLES_2_5 = sdata.particles_25um;
+    _data->PM_TOTALPARTICLES_5_0 = sdata.particles_50um;
+    _data->PM_TOTALPARTICLES_10_0 = sdata.particles_100um;
   }
 }
