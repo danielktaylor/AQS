@@ -2,53 +2,68 @@
    Use the latest sensor readings to calculate the Air Quality
    Index value using the EPA AQI reporting method.
 */
+
+// EPA AQI breakpoints for PM2.5
+
+const struct {
+  float pMin;
+  float pRange;
+  uint16_t aqMin;
+  uint16_t aqRange;
+} AQITable25[] = {
+      {  0.0,    12.0,   0, 50},
+      { 12.1,    23.4,  51, 49},
+      { 35.5,    24.3, 101, 49},
+      { 55.5,    84.9, 151, 49},
+      {150.5,    99.9, 201, 99},
+      {250.5,    99.9, 301, 99},
+      {350.5,   249.9, 401, 99},
+      {500.5, 99999.9, 501, 498}
+};
+static const int AQITableLength25 = sizeof(AQITable25)/sizeof(AQITable25[0]);
+
+uint16_t derivedAQI25(uint16_t reading) {
+  int i;
+  for (i = 0; i < AQITableLength25; i++) {
+    if (reading < AQITable25[i].pMin) break;
+  }
+  i--;
+  float aqi = ((reading -  AQITable25[i].pMin)*(AQITable25[i].aqRange))/AQITable25[i].pRange + AQITable25[i].aqMin;
+  return (uint16_t)aqi;
+}
+
+// EPA AQI breakpoints for PM10
+// Note that this isn't actually useful with the PMS5003 because it doesn't directly measure particle sizes >0.3
+
+const struct {
+  float pMin;
+  float pRange;
+  uint16_t aqMin;
+  uint16_t aqRange;
+} AQITable10[] = {
+      {   0,  54,   0,  50},
+      {  55,  99,  51,  49},
+      { 155,  99, 101,  49},
+      { 255,  99, 151,  49},
+      { 355,  69, 201,  99},
+      { 425, 178, 301, 199}
+};
+static const int AQITableLength10 = sizeof(AQITable25)/sizeof(AQITable25[0]);
+
+uint16_t derivedAQI10(uint16_t reading) {
+  int i;
+  for (i = 0; i < AQITableLength10; i++) {
+    if (reading < AQITable10[i].pMin) break;
+  }
+  i--;
+  float aqi = ((reading -  AQITable10[i].pMin)*(AQITable10[i].aqRange))/AQITable10[i].pRange + AQITable10[i].aqMin;
+  return (uint16_t)aqi;
+}
+
 void calculateEpaAqi()
 {
-  uint8_t pm2p5_aqi = 0;
-  if (g_pm2p5_ppd_value <= 11) {
-    pm2p5_aqi = 1;
-  } else if (g_pm2p5_ppd_value <= 23) {
-    pm2p5_aqi = 2;
-  } else if (g_pm2p5_ppd_value <= 35) {
-    pm2p5_aqi = 3;
-  } else if (g_pm2p5_ppd_value <= 41) {
-    pm2p5_aqi = 4;
-  } else if (g_pm2p5_ppd_value <= 47) {
-    pm2p5_aqi = 5;
-  } else if (g_pm2p5_ppd_value <= 53) {
-    pm2p5_aqi = 6;
-  } else if (g_pm2p5_ppd_value <= 58) {
-    pm2p5_aqi = 7;
-  } else if (g_pm2p5_ppd_value <= 64) {
-    pm2p5_aqi = 8;
-  } else if (g_pm2p5_ppd_value <= 70) {
-    pm2p5_aqi = 9;
-  } else {
-    pm2p5_aqi = 10;
-  }
-
-  uint8_t pm10p0_aqi = 0;
-  if (g_pm10p0_ppd_value <= 16) {
-    pm10p0_aqi = 1;
-  } else if (g_pm10p0_ppd_value <= 33) {
-    pm10p0_aqi = 2;
-  } else if (g_pm10p0_ppd_value <= 50) {
-    pm10p0_aqi = 3;
-  } else if (g_pm10p0_ppd_value <= 58) {
-    pm10p0_aqi = 4;
-  } else if (g_pm10p0_ppd_value <= 66) {
-    pm10p0_aqi = 5;
-  } else if (g_pm10p0_ppd_value <= 75) {
-    pm10p0_aqi = 6;
-  } else if (g_pm10p0_ppd_value <= 83) {
-    pm10p0_aqi = 7;
-  } else if (g_pm10p0_ppd_value <= 91) {
-    pm10p0_aqi = 8;
-  } else if (g_pm10p0_ppd_value <= 100) {
-    pm10p0_aqi = 9;
-  } else {
-    pm10p0_aqi = 10;
-  }
+  uint16_t pm2p5_aqi = derivedAQI25(g_pm2p5_sp_value);
+  uint16_t pm10p0_aqi = derivedAQI10(g_pm10p0_sp_value);
 
   if (pm10p0_aqi > pm2p5_aqi)
   {
