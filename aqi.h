@@ -4,6 +4,9 @@
 */
 
 // EPA AQI breakpoints for PM2.5
+//
+// We don't use the PM10 measurement because the PMS5003
+// doesn't accurately measure that particle size.
 
 const struct {
   float pMin;
@@ -32,43 +35,8 @@ uint16_t derivedAQI25(uint16_t reading) {
   return (uint16_t)aqi;
 }
 
-// EPA AQI breakpoints for PM10
-// Note that this isn't actually useful with the PMS5003 because it doesn't directly measure particle sizes >0.3
-
-const struct {
-  float pMin;
-  float pRange;
-  uint16_t aqMin;
-  uint16_t aqRange;
-} AQITable10[] = {
-      {   0,  54,   0,  50},
-      {  55,  99,  51,  49},
-      { 155,  99, 101,  49},
-      { 255,  99, 151,  49},
-      { 355,  69, 201,  99},
-      { 425, 178, 301, 199}
-};
-static const int AQITableLength10 = sizeof(AQITable25)/sizeof(AQITable25[0]);
-
-uint16_t derivedAQI10(uint16_t reading) {
-  int i;
-  for (i = 0; i < AQITableLength10; i++) {
-    if (reading < AQITable10[i].pMin) break;
-  }
-  i--;
-  float aqi = ((reading -  AQITable10[i].pMin)*(AQITable10[i].aqRange))/AQITable10[i].pRange + AQITable10[i].aqMin;
-  return (uint16_t)aqi;
-}
-
 void calculateEpaAqi()
 {
   uint16_t pm2p5_aqi = derivedAQI25(g_pm2p5_sp_value);
-  uint16_t pm10p0_aqi = derivedAQI10(g_pm10p0_sp_value);
-
-  if (pm10p0_aqi > pm2p5_aqi)
-  {
-    g_epa_aqi_value = pm10p0_aqi;
-  } else {
-    g_epa_aqi_value = pm2p5_aqi;
-  }
+  g_epa_aqi_value = pm2p5_aqi;
 }

@@ -427,6 +427,8 @@ void reportToSerial()
     /* Report EPA AQI value */
     Serial.print("AQI:");
     Serial.println(String(g_epa_aqi_value));
+
+    Serial.println(String("-------"));
   }
 }
 
