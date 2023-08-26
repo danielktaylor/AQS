@@ -55,7 +55,7 @@ uint32_t  g_pm2p5_ppd_value     = 0;  // Particles Per Deciliter pm2.5 reading
 uint32_t  g_pm5p0_ppd_value     = 0;  // Particles Per Deciliter pm5.0 reading
 uint32_t  g_pm10p0_ppd_value    = 0;  // Particles Per Deciliter pm10.0 reading
 
-uint8_t   g_epa_aqi_value        = 0;  // Air Quality Index value using EPA reporting system
+uint16_t   g_epa_aqi_value        = 0;  // Air Quality Index value using EPA reporting system
 uint16_t  g_us_aqi_value        = 0;  // Air Quality Index value using US reporting system
 
 // MQTT
